@@ -1264,13 +1264,14 @@ async function loadMisRegistros(){
     const mesActualStr=new Date().toISOString().slice(0,7);
     const mesSel=mesesOrdenados.includes(mesActualStr)?mesActualStr:(mesesOrdenados[0]||mesActualStr);
 
-    // Calcular horas del mes seleccionado
+    // Calcular horas del mes seleccionado — sin índice compuesto
     async function calcHorasMes(mes){
       const desde=mes+'-01';
       const hasta=mes+'-31';
       try{
-        const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
-        return s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
+        // Solo filtramos por colId, el resto lo hacemos del lado del cliente
+        const s=await db.collection('jornadas').where('colId','==',CU.id).get();
+        return s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha>=desde&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
       }catch(e){return 0;}
     }
 
@@ -1348,8 +1349,8 @@ async function actualizarHorasMes(mes){
   const desde=mes+'-01';
   const hasta=mes+'-31';
   try{
-    const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
-    const h=s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
+    const s=await db.collection('jornadas').where('colId','==',CU.id).get();
+    const h=s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha>=desde&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
     el.textContent=fmtH(h);
   }catch(e){el.textContent='—';}
 }
