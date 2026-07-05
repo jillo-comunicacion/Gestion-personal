@@ -888,7 +888,9 @@ async function loadEquipoTab(){
         <div class="avatar" style="${avS(i)}">${ini(c.nombre)}</div>
         <div style="flex:1;min-width:160px;">
           <div style="font-weight:500;">${c.nombre}</div>
-          <div style="font-size:12px;color:#888;">${c.rol} · <strong>${c.username}</strong></div>
+          <div style="font-size:12px;color:#888;">${c.rol} · <strong>${c.username}</strong>
+            <button class="btn sm" style="margin-left:6px;padding:2px 8px;font-size:11px;" onclick="editarCredenciales('${c.id}','${c.username}')">Editar usuario/clave</button>
+          </div>
           <div style="font-size:12px;color:#3B6D11;margin-top:2px;">Valor hora: <strong>${fmtP(vh)}/h</strong></div>
           <div style="font-size:12px;color:#185FA5;margin-top:1px;">Horas previas ${mes}: <strong>${hp}h</strong>
             <button class="btn sm" style="margin-left:6px;padding:2px 8px;font-size:11px;" onclick="editarHP('${c.id}','${mes}',${hp})">Editar</button>
@@ -903,6 +905,25 @@ async function loadEquipoTab(){
     }).join('');
 }
 async function editarHP(colId,mes,actual){const val=prompt(`Horas previas de ${mes} (actual: ${actual}h):`);if(val===null)return;const n=parseFloat(val);if(isNaN(n)||n<0){alert('Valor inválido');return;}const col=CEQ.find(c=>c.id===colId);const hp=col.horasPrevias||{};hp[mes]=n;await db.collection('equipo').doc(colId).update({horasPrevias:hp});CEQ=null;loadEquipoTab();}
+async function editarCredenciales(colId,usernameActual){
+  const nuevoUser=prompt(`Nuevo usuario (actual: ${usernameActual}):`,usernameActual);
+  if(nuevoUser===null)return;
+  const userLimpio=nuevoUser.trim();
+  if(!userLimpio){alert('El usuario no puede estar vacío');return;}
+  if(userLimpio!==usernameActual){
+    const ex=await db.collection('equipo').where('username','==',userLimpio).get();
+    if(!ex.empty){alert('Ese nombre de usuario ya está en uso por otro colaborador');return;}
+  }
+  const nuevaPass=prompt('Nueva contraseña (dejá vacío para no cambiarla):');
+  if(nuevaPass===null)return;
+  const updates={username:userLimpio};
+  if(nuevaPass.trim())updates.password=nuevaPass.trim();
+  try{
+    await db.collection('equipo').doc(colId).update(updates);
+    alert('Credenciales actualizadas correctamente');
+    CEQ=null;loadEquipoTab();
+  }catch(e){alert('Error: '+e.message);}
+}
 async function actualizarVH(id){const input=document.getElementById('vh-'+id);const valor=parseFloat(input.value);if(!valor||valor<=0){alert('Ingresá un valor válido');return;}const col=CEQ.find(c=>c.id===id);const tarifas=col.tarifas||[];tarifas.push({desde:hoy(),valor});await db.collection('equipo').doc(id).update({valorHora:valor,tarifas});input.value='';CEQ=null;loadEquipoTab();}
 async function agregarColaborador(){
   const nombre=document.getElementById('new-nombre').value.trim(),rol=document.getElementById('new-rol').value.trim(),username=document.getElementById('new-user').value.trim(),password=document.getElementById('new-pass').value.trim(),vh=parseFloat(document.getElementById('new-vh').value)||0;
@@ -984,13 +1005,27 @@ async function loadJornada(){
   const cont=document.getElementById('jornada-content');
   cont.innerHTML='<div style="text-align:center;padding:2rem;color:#999;">Cargando...</div>';
   if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
-  // Usar fecha del servidor para evitar desfase de zona horaria
+  // Buscar jornadas abiertas sin filtrar por fecha — evita problemas de zona horaria
   const today=await getServerDate();
-  const[snap,clientes]=await Promise.all([
+  const primerMesCol=today.slice(0,7)+'-01';
+  const[snapAbiertas,snapHoy,snapMes,clientes]=await Promise.all([
+    db.collection('jornadas').where('colId','==',CU.id).where('cierre','==',null).get(),
     db.collection('jornadas').where('colId','==',CU.id).where('fecha','==',today).get(),
+    db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',primerMesCol).get(),
     getClientes()
   ]);
-  const jornadas=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.inicio.localeCompare(b.inicio));
+  // Horas del mes
+  const jMesCol=snapMes.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas);
+  const horasMes=jMesCol.reduce((a,j)=>a+(j.horas||0),0);
+  // Unir ambas consultas y deduplicar por id
+  const todosIds=new Set();
+  const todosDocs=[...snapAbiertas.docs,...snapHoy.docs].filter(d=>{
+    if(todosIds.has(d.id))return false;
+    todosIds.add(d.id);return true;
+  });
+  const snapDocs={docs:todosDocs};
+  const snap=snapDocs;
+  const jornadas=snap.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j.fecha===today||!j.cierre).sort((a,b)=>a.inicio.localeCompare(b.inicio));
   const jornadaAbierta=jornadas.find(j=>!j.cierre);
   const jornadasCerradas=jornadas.filter(j=>j.cierre);
   const totalH=jornadasCerradas.reduce((a,j)=>a+(j.horas||0),0);
@@ -1006,12 +1041,12 @@ async function loadJornada(){
     </div>
   </div>`;
 
-  if(totalH>0||todasTareasHoy.length>0){
-    html+=`<div style="background:#f5f5f3;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap;">
-      <div><div style="font-size:11px;color:#888;margin-bottom:2px;">Horas acumuladas</div><div style="font-size:18px;font-weight:500;">${fmtH(totalH)}</div></div>
-      <div><div style="font-size:11px;color:#888;margin-bottom:2px;">Tareas completadas</div><div style="font-size:18px;font-weight:500;">${todasTareasHoy.length}</div></div>
-    </div>`;
-  }
+  // Resumen del mes siempre visible
+  const mesNombreCol=new Date(today+'T12:00:00').toLocaleString('es-AR',{month:'long'});
+  html+=`<div style="background:#EAF3DE;border:1px solid #C0DD97;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+    <div><div style="font-size:11px;color:#3B6D11;font-weight:500;margin-bottom:2px;">${mesNombreCol.charAt(0).toUpperCase()+mesNombreCol.slice(1)}</div><div style="font-size:20px;font-weight:500;color:#27500A;">${fmtH(horasMes)}</div><div style="font-size:11px;color:#639922;">este mes</div></div>
+    ${totalH>0?`<div style="border-left:1px solid #C0DD97;padding-left:16px;"><div style="font-size:11px;color:#888;margin-bottom:2px;">Hoy</div><div style="font-size:20px;font-weight:500;">${fmtH(totalH)}</div><div style="font-size:11px;color:#999;">${todasTareasHoy.length} tarea${todasTareasHoy.length!==1?'s':''}</div></div>`:''}
+  </div>`;
 
   jornadasCerradas.forEach(j=>{
     html+=`<div class="jornada-bloque">
@@ -1132,7 +1167,8 @@ async function registrarInicio(){
   if(btn){btn.disabled=true;btn.textContent='Iniciando...';}
   try{
     const todayServer=await getServerDate();
-    const existing=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','==',todayServer).where('cierre','==',null).get();
+    // Buscar jornadas abiertas sin combinar 3 condiciones (evita fallos por índice faltante)
+    const existing=await db.collection('jornadas').where('colId','==',CU.id).where('cierre','==',null).get();
     if(!existing.empty){loadJornada();return;}
     const horaServidor=await getServerTime();
     await db.collection('jornadas').add({colId:CU.id,nombre:CU.nombre,fecha:todayServer,inicio:horaServidor,cierre:null,horas:null,tareas:[],tareasActivas:[],foco:0,traba:'',manual:false});
