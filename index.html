@@ -952,8 +952,9 @@ async function loadCargaManual(){
   renderCmTareas(cl);loadJornadasAbiertas();
 }
 async function loadJornadasAbiertas(){
-  const snapAb=await db.collection('jornadas').where('cierre','==',null).get();
-  const abiertas=snapAb.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j.inicio).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const hace7=new Date();hace7.setDate(hace7.getDate()-7);
+  const jornadas=await getJornadas(hace7.toISOString().slice(0,10));
+  const abiertas=jornadas.filter(j=>j.inicio&&!j.cierre);
   const cont=document.getElementById('lista-abiertas');
   if(!abiertas.length){cont.innerHTML='<div class="empty">No hay jornadas sin cerrar.</div>';return;}
   cont.innerHTML=abiertas.map(j=>`<div class="row" style="flex-wrap:wrap;gap:8px;"><div style="min-width:70px;font-size:12px;color:#999;flex-shrink:0;">${j.fecha.slice(5)}<br>Desde ${j.inicio}</div><div style="flex:1;min-width:100px;"><div style="font-weight:500;">${j.nombre}</div><div style="font-size:12px;color:#BA7517;">Sin cerrar</div></div><button class="btn sm warning" onclick="cerrarJornadaAdmin('${j.id}','${j.nombre}','${j.inicio}','${j.fecha}')">Cerrar →</button></div>`).join('');
@@ -1010,26 +1011,12 @@ async function loadJornada(){
   // Buscar jornadas abiertas sin filtrar por fecha — evita problemas de zona horaria
   const today=await getServerDate();
   const primerMesCol=today.slice(0,7)+'-01';
-  const[snapAbiertas,snapHoy,clientes]=await Promise.all([
-    db.collection('jornadas').where('colId','==',CU.id).where('cierre','==',null).get(),
+  const[snapHoy,clientes]=await Promise.all([
     db.collection('jornadas').where('colId','==',CU.id).where('fecha','==',today).get(),
     getClientes()
   ]);
-  // Horas del mes - consulta separada para no bloquear si falla
-  let horasMes=0;
-  try{
-    const snapMes=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',primerMesCol).get();
-    horasMes=snapMes.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas).reduce((a,j)=>a+(j.horas||0),0);
-  }catch(e){horasMes=0;}
-  // Unir ambas consultas y deduplicar por id
-  const todosIds=new Set();
-  const todosDocs=[...snapAbiertas.docs,...snapHoy.docs].filter(d=>{
-    if(todosIds.has(d.id))return false;
-    todosIds.add(d.id);return true;
-  });
-  const snapDocs={docs:todosDocs};
-  const snap=snapDocs;
-  const jornadas=snap.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j.fecha===today||!j.cierre).sort((a,b)=>a.inicio.localeCompare(b.inicio));
+  // Solo jornadas de hoy — las viejas abiertas se manejan desde admin
+  const jornadas=snapHoy.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.inicio.localeCompare(b.inicio));
   const jornadaAbierta=jornadas.find(j=>!j.cierre);
   const jornadasCerradas=jornadas.filter(j=>j.cierre);
   const totalH=jornadasCerradas.reduce((a,j)=>a+(j.horas||0),0);
