@@ -952,8 +952,8 @@ async function loadCargaManual(){
   renderCmTareas(cl);loadJornadasAbiertas();
 }
 async function loadJornadasAbiertas(){
-  const hace3=new Date();hace3.setDate(hace3.getDate()-3);
-  const abiertas=(await getJornadas(hace3.toISOString().slice(0,10))).filter(j=>j.inicio&&!j.cierre);
+  const snapAb=await db.collection('jornadas').where('cierre','==',null).get();
+  const abiertas=snapAb.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j.inicio).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const cont=document.getElementById('lista-abiertas');
   if(!abiertas.length){cont.innerHTML='<div class="empty">No hay jornadas sin cerrar.</div>';return;}
   cont.innerHTML=abiertas.map(j=>`<div class="row" style="flex-wrap:wrap;gap:8px;"><div style="min-width:70px;font-size:12px;color:#999;flex-shrink:0;">${j.fecha.slice(5)}<br>Desde ${j.inicio}</div><div style="flex:1;min-width:100px;"><div style="font-weight:500;">${j.nombre}</div><div style="font-size:12px;color:#BA7517;">Sin cerrar</div></div><button class="btn sm warning" onclick="cerrarJornadaAdmin('${j.id}','${j.nombre}','${j.inicio}','${j.fecha}')">Cerrar →</button></div>`).join('');
@@ -1264,14 +1264,13 @@ async function loadMisRegistros(){
     const mesActualStr=new Date().toISOString().slice(0,7);
     const mesSel=mesesOrdenados.includes(mesActualStr)?mesActualStr:(mesesOrdenados[0]||mesActualStr);
 
-    // Calcular horas del mes seleccionado — sin índice compuesto
+    // Calcular horas del mes seleccionado
     async function calcHorasMes(mes){
       const desde=mes+'-01';
       const hasta=mes+'-31';
       try{
-        // Solo filtramos por colId, el resto lo hacemos del lado del cliente
-        const s=await db.collection('jornadas').where('colId','==',CU.id).get();
-        return s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha>=desde&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
+        const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
+        return s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
       }catch(e){return 0;}
     }
 
@@ -1349,8 +1348,8 @@ async function actualizarHorasMes(mes){
   const desde=mes+'-01';
   const hasta=mes+'-31';
   try{
-    const s=await db.collection('jornadas').where('colId','==',CU.id).get();
-    const h=s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha>=desde&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
+    const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
+    const h=s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
     el.textContent=fmtH(h);
   }catch(e){el.textContent='—';}
 }
