@@ -1010,12 +1010,10 @@ async function loadJornada(){
   if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
   // Buscar jornadas abiertas sin filtrar por fecha — evita problemas de zona horaria
   const today=await getServerDate();
-  const primerMesCol=today.slice(0,7)+'-01';
   const[snapHoy,clientes]=await Promise.all([
     db.collection('jornadas').where('colId','==',CU.id).where('fecha','==',today).get(),
     getClientes()
   ]);
-  // Solo jornadas de hoy — las viejas abiertas se manejan desde admin
   const jornadas=snapHoy.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.inicio.localeCompare(b.inicio));
   const jornadaAbierta=jornadas.find(j=>!j.cierre);
   const jornadasCerradas=jornadas.filter(j=>j.cierre);
@@ -1243,42 +1241,6 @@ async function loadMisRegistros(){
 
     let html='';
 
-    // Meses disponibles para el selector
-    const todosSnap=await db.collection('jornadas').where('colId','==',CU.id).get();
-    const mesesDisp=new Set();
-    todosSnap.docs.forEach(d=>{const f=d.data().fecha;if(f)mesesDisp.add(f.slice(0,7));});
-    const mesesOrdenados=[...mesesDisp].sort((a,b)=>b.localeCompare(a));
-    const mesActualStr=new Date().toISOString().slice(0,7);
-    const mesSel=mesesOrdenados.includes(mesActualStr)?mesActualStr:(mesesOrdenados[0]||mesActualStr);
-
-    // Calcular horas del mes seleccionado
-    async function calcHorasMes(mes){
-      const desde=mes+'-01';
-      const hasta=mes+'-31';
-      try{
-        const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
-        return s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
-      }catch(e){return 0;}
-    }
-
-    let horasMesReg=await calcHorasMes(mesSel);
-
-    function fmtMesLabel(m){
-      const[y,mo]=m.split('-');
-      const nombre=new Date(parseInt(y),parseInt(mo)-1,1).toLocaleString('es-AR',{month:'long',year:'numeric'});
-      return nombre.charAt(0).toUpperCase()+nombre.slice(1);
-    }
-
-    const opsMeses=mesesOrdenados.map(m=>`<option value="${m}"${m===mesSel?' selected':''}>${fmtMesLabel(m)}</option>`).join('');
-
-    html+=`<div style="background:#EAF3DE;border:1px solid #C0DD97;border-radius:10px;padding:14px;margin-bottom:1rem;">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-        <div style="font-size:11px;color:#3B6D11;font-weight:500;text-transform:uppercase;letter-spacing:0.05em;">Horas acumuladas</div>
-        <select id="sel-mes-col" onchange="actualizarHorasMes(this.value)" style="width:auto;padding:4px 8px;font-size:12px;border-color:#C0DD97;background:#f8fdf3;">${opsMeses}</select>
-      </div>
-      <div style="font-size:30px;font-weight:500;color:#27500A;" id="horas-mes-col">${fmtH(horasMesReg)}</div>
-    </div>`;
-
     // Resumen
     html+=`<div style="background:#f8fdf3;border:1px solid #C0DD97;border-radius:10px;padding:14px;margin-bottom:1rem;">
       <div style="font-size:11px;color:#3B6D11;font-weight:500;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em;">${esEstaSemana?'Esta semana':'Semana anterior'}</div>
@@ -1326,19 +1288,6 @@ async function loadMisRegistros(){
     console.error(e);
     cont.innerHTML='<div class="alert alert-err">Error al cargar. Revisá tu conexión.</div>';
   }
-}
-
-async function actualizarHorasMes(mes){
-  const el=document.getElementById('horas-mes-col');
-  if(!el)return;
-  el.textContent='...';
-  const desde=mes+'-01';
-  const hasta=mes+'-31';
-  try{
-    const s=await db.collection('jornadas').where('colId','==',CU.id).where('fecha','>=',desde).get();
-    const h=s.docs.map(d=>d.data()).filter(j=>j.cierre&&j.horas&&j.fecha<=hasta).reduce((a,j)=>a+(j.horas||0),0);
-    el.textContent=fmtH(h);
-  }catch(e){el.textContent='—';}
 }
 
 function setMsg(id,tipo,msg){
